@@ -5,11 +5,193 @@
     <link rel="stylesheet" type="text/css" href="https://cdn.mxpnl.com/libs/mixpanel-platform/css/reset.css">
     <link rel="stylesheet" type="text/css" href="https://cdn.mxpnl.com/libs/mixpanel-platform/build/mixpanel-platform.v0.latest.min.css">
     <script src="https://cdn.mxpnl.com/libs/mixpanel-platform/build/mixpanel-platform.v0.latest.min.js"></script>
+    <script type="text/javascript" src="http://code.jquery.com/jquery-latest.js"></script>
+    <script type="text/javascript" src="https://github.com/douglascrockford/JSON-js/raw/master/json2.js"></script>
   </head>
   <body class="mixpanel-platform-body">
-    <h1>Hello, World!</h1>
+    <div class="mixpanel-platform-section">
+      <div class="instructions">
+        <h1 style="font-size: 18px; color: rgb(95,105,131)">People Profiles Export</h1>
+        <p style="font-size: 13px; color: rgb(95,105,131)">Please enter property selector. For example: ("San Francisco" in properties["$city"]) </p>
+      </div>
+      <form id="property" style="margin-bottom: 15px; height: 31px">
+        <input type="text" autofocus placeholder="Property Selector" name="property-name-field" value="" style="color: rgb(95,105,131); height: 30px; width: 500px; padding: 0 4px; font-size: 12px; border: 1px solid rgb(201,209,219)">
+        <input type="submit" name="submit" value="Check" style="font-weight: bold; color: rgb(95,105,131); font-size: 12px; height: 31px; padding: 0 10px; margin-left: 10px; border: 1px solid rgb(201,209,219); background-color: rgb(242,244,246)">
+      </form>
+      <div class="instructionstwo">
+        <p style="font-size: 13px; color: rgb(95,105,131)">Please enter desired filename without extention. **Note: Check before export**</p>
+      </div>
+      <form id="file" style="margin-bottom: 15px; height: 31px">  
+        <input type="text" autofocus placeholder="Filename" name="filename" value="" style="color: rgb(95,105,131); height: 30px; width: 500px; padding: 0 4px; font-size: 12px; border: 1px solid rgb(201,209,219)">
+        <input type="submit" name="export" value="Export" style="font-weight: bold; color: rgb(95,105,131); font-size: 12px; height: 31px; padding: 0 10px; margin-left: 10px; border: 1px solid rgb(201,209,219); background-color: rgb(242,244,246)">
+      </form>
+      <div class="confirmation">
+        <p class="confirm-text" style="color: rgb(95,105,131); font-size: 15px"></p>
+      </div>
+      <div style="clear: both;"></div>
+    </div>
     <script>
-      // Run queries and display results here
+    MP.api.ready(function() {
+      //Set global variables
+      var propertyName = '',
+          numPeople = 0,
+          totalProfiles = 0,
+          pageNum = 0,
+          nextPage = true,
+          output = [];
+          
+      //Function for pagination
+      function getProfiles(pageNum, sessionId, output){
+        MP.api.people({where: propertyName, page: pageNum, session_id: sessionId}).done(function(peopleProf) {
+          numPeople = Object.keys(peopleProf.values().results).length;
+          if (numPeople == 1000) {
+            pageNum++;
+            output.push(peopleProf.values().results)
+            getProfiles(pageNum, sessionId, output)
+          } else { // ending iteration
+            output.push(peopleProf.values().results)
+            totalProfiles = (pageNum)*1000 + numPeople;
+            $('.confirm-text').html(
+              "Property: <strong>" + propertyName + 
+              "</strong><br># People profiles that match: <strong>" + totalProfiles + "</strong>")
+            .css("color", "rgb(95,105,131)");
+            runQuery(output);
+          }; 
+        })
+      };
+          
+          
+      //Record selector for profiles
+      $('#property').submit(function(e) {
+        e.preventDefault();
+        propertyName = $('#property input:first').val();
+        
+        //Building out profiles  
+        MP.api.people({where: propertyName, page: 0}).done(function(results) {
+          console.log(results.values())
+          var sessionId = results.values()['session_id'];
+          numPeople = Object.keys(results.values().results).length;
+          if (numPeople == 1000) {
+            pageNum++;
+            output = [results.values().results];
+            getProfiles(pageNum, sessionId, output)
+          } else {
+            output = [results.values().results];
+            totalProfiles = numPeople
+            $('.confirm-text').html(
+              "Property: <strong>" + propertyName + 
+              "</strong><br># People profiles that match: <strong>" + totalProfiles + "</strong>")
+            .css("color", "rgb(95,105,131)");
+            runQuery(output);
+          }; 
+        }).fail(function() {
+          $('.confirm-text')
+            .html("Error: Please enter a valid property selector.")
+            .css("color", "red");
+        });
+      });
+      
+      function runQuery(results) {
+        $('#file').submit(function(e) {
+          var data = results;
+          if(data == '') {
+            return;
+          }
+          fileName = $('#file input:first').val();
+          JSONToCSVConvertor(data, fileName);
+        });
+      };
+      
+      //Creating dictionary for each property
+      function getSubKeys(listOfDicts) {
+        subkeys = {};
+        //For each profile
+        _.each(_.keys(listOfDicts), function(profileIndex){
+          var profilePropData = listOfDicts[profileIndex]['$properties'];
+          _.each(_.keys(profilePropData), function(property){
+            try {
+              subkeys[property] = true;
+            } catch (e) {}
+          });
+        });
+        return subkeys;
+      };  
+      
+      function JSONToCSVConvertor(JSONData, ReportTitle) {
+        //If JSONData is not an object then JSON.parse will parse the JSON string in an Object
+        var data = typeof JSONData != 'object' ? JSON.parse(JSONData) : JSONData;
+        var CSV = ''
+        
+        //Create list of profiles
+        var event_list = [];
+        for (i = 0; i < JSONData.length; i++) {
+          _.each(_.keys(data[i]), function(profileIndex){
+          var profileData = data[i][profileIndex];
+          event_list.push(profileData)
+          });
+        };
+        
+        //Write the header with people properties
+        subkeys = getSubKeys(event_list)
+        var row = ''
+        row += '$distinct_id, '
+        _.each(_.keys(subkeys), function(property) {
+          row += property + ','
+        })
+        CSV += row + '\r\n';
+        
+        //Write the data
+        _.each(_.keys(event_list), function(eventIndex) {
+          var event = event_list[eventIndex]
+          var row = ''
+          try {
+            row += event['$distinct_id'] + ','
+          } catch (e) {
+            row += ','
+          }
+          _.each(_.keys(subkeys), function(property) {
+            data = event['$properties'][property]
+            if (!data) {
+              row += ','
+            } else if (_.isString(data)) {
+              row += data.replace(/,/g, "|") + ","
+            } else {
+              row += data + ","
+            }
+            //if (data.indexOf(',') > -1) 
+          });
+          CSV += row + '\r\n';
+        });
+        
+          
+        //Generate a file name
+        var fileName = ReportTitle.replace(/ /g,"_");   
+    
+        //Initialize file format you want csv or xls
+        var uri = 'data:text/csv;charset=utf-8,' + escape(CSV);
+    
+        // Now the little tricky part.
+        // you can use either>> window.open(uri);
+        // but this will not work in some browsers
+        // or you will not get the correct file extension    
+    
+        //this trick will generate a temp <a /> tag
+        var link = document.createElement("a");    
+        link.href = uri;
+    
+        //set the visibility hidden so it will not effect on your web-layout
+        link.style = "visibility:hidden";
+        link.download = fileName + ".csv";
+    
+        //this part will append the anchor tag and remove it after automatic click
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+      };
+      
+      });
+
     </script>
   </body>
 </html>
